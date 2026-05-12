@@ -164,7 +164,10 @@ async function extractWorkbookRows(file) {
     const workbook = XLSX.read(data, { type: "array", cellDates: true, bookVBA: false });
     if (!workbook.SheetNames?.length) throw new ExcelParseError("シートが見つかりませんでした");
 
-    const parsedRows = workbook.SheetNames.flatMap((sheetName) => sheetToFilledRows(sheetName, workbook.Sheets[sheetName]));
+    const sheets = workbook.SheetNames.map((sheetName) => sheetToFilledSheet(sheetName, workbook.Sheets[sheetName]));
+    const parsedRows = sheets.flatMap((sheet) => sheet.rows);
+    parsedRows.sheets = sheets;
+    parsedRows.usedMerges = sheets.some((sheet) => sheet.usedMerges);
     if (!parsedRows.some((row) => row.cells.length > 0)) throw new ExcelParseError("セルデータを読み取れませんでした");
     return parsedRows;
   } catch (error) {
@@ -173,8 +176,8 @@ async function extractWorkbookRows(file) {
   }
 }
 
-function sheetToFilledRows(sheetName, sheet) {
-  if (!sheet?.["!ref"]) return [];
+function sheetToFilledSheet(sheetName, sheet) {
+  if (!sheet?.["!ref"]) return { sheetName, rows: [], grid: [], usedMerges: false };
   const range = XLSX.utils.decode_range(sheet["!ref"]);
   const filled = new Map();
   const original = new Set();
@@ -202,19 +205,21 @@ function sheetToFilledRows(sheetName, sheet) {
   });
 
   const rows = [];
+  const grid = [];
   for (let row = range.s.r; row <= range.e.r; row += 1) {
     const cells = [];
+    grid[row] = [];
     for (let column = range.s.c; column <= range.e.c; column += 1) {
       const key = `${row}:${column}`;
-      const value = filled.get(key);
+      const value = filled.get(key) || "";
+      grid[row][column] = value;
       if (!value) continue;
       cells.push({ value, columnIndex: column, rowIndex: row, fromMerge: !original.has(key) });
     }
     if (cells.length) rows.push({ sheetName, rowIndex: row, cells });
   }
-  return rows;
+  return { sheetName, rows, grid, usedMerges: Boolean(sheet["!merges"]?.length) };
 }
-
 class ExcelFileTypeError extends Error {
   constructor(message) {
     super(message);
@@ -362,20 +367,17 @@ function parseEventsFromWorkbook(rows, date) {
   if (!rows.length) return { events: [], log };
 
   const dateCandidates = findExcelDateCandidates(rows, date);
-  const groupCandidates = findExcelGroupCandidates(rows);
+  const blockCandidates = findGroupBlockCandidates(rows, dateCandidates);
   log.dateCandidates = dateCandidates.length;
-  log.groupCandidates = groupCandidates.length;
+  log.groupCandidates = blockCandidates.length;
 
-  const directDateEvents = parseDateSectionEvents(rows, dateCandidates);
-  const columnEvents = parseDateColumnEvents(rows, dateCandidates);
-  const proximityEvents = parseProximityEvents(rows, dateCandidates, groupCandidates);
-  const fallbackEvents = directDateEvents.length || columnEvents.length || proximityEvents.length ? [] : parseFallbackGroupCandidates(groupCandidates);
-  const merged = [...directDateEvents, ...columnEvents, ...proximityEvents, ...fallbackEvents];
+  const blockEvents = parseGroupBlockEvents(rows, dateCandidates, blockCandidates);
+  const fallbackEvents = blockEvents.length ? [] : parseFallbackBlockCandidates(blockCandidates);
   const unique = new Map();
 
-  merged.forEach((event) => {
+  [...blockEvents, ...fallbackEvents].forEach((event) => {
     if (!hasEventContent(event)) return;
-    const key = [event.group, event.time, event.activity, event.place, event.source].join("|");
+    const key = [event.group, event.time, event.activity, event.place, event.staff, event.source].join("|");
     if (!unique.has(key)) unique.set(key, event);
   });
 
@@ -389,124 +391,147 @@ function parseEventsFromWorkbook(rows, date) {
 }
 
 function createEmptyExcelLog() {
-  return { sheets: [], dateCandidates: 0, groupCandidates: 0, adopted: 0, exact: 0, candidates: 0, needConfirmation: 0, mode: "未読み込み" };
+  return { sheets: [], usedMerges: false, dateCandidates: 0, groupCandidates: 0, adopted: 0, exact: 0, candidates: 0, needConfirmation: 0, mode: "未読み込み" };
 }
 
 function createExcelLog(rows) {
   const log = createEmptyExcelLog();
-  log.sheets = Array.from(new Set(rows.map((row) => row.sheetName)));
+  log.sheets = rows.sheets?.map((sheet) => sheet.sheetName) || Array.from(new Set(rows.map((row) => row.sheetName)));
+  log.usedMerges = Boolean(rows.usedMerges || rows.sheets?.some((sheet) => sheet.usedMerges));
   log.mode = rows.length ? "解析中" : "未読み込み";
   return log;
 }
 
 function findExcelDateCandidates(rows, date) {
   const candidates = [];
+  const seen = new Set();
   rows.forEach((row) => {
     row.cells.forEach((cell) => {
       const match = getDateMatchLevel(cell.value, date);
       if (!match) return;
-      candidates.push({ ...cell, sheetName: row.sheetName, rowIndex: row.rowIndex, matchLevel: match.level, label: match.label });
+      const key = `${row.sheetName}:${row.rowIndex}:${cell.columnIndex}:${match.level}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      candidates.push({ ...cell, sheetName: row.sheetName, rowIndex: row.rowIndex, matchLevel: match.level, label: match.label, evidence: `セル日付: ${cell.value}` });
     });
+
+    const rowMatch = getDateMatchLevel(row.cells.map((cell) => cell.value).join(" "), date);
+    if (rowMatch) {
+      const firstColumn = row.cells[0]?.columnIndex ?? 0;
+      const key = `${row.sheetName}:${row.rowIndex}:${firstColumn}:row:${rowMatch.level}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        candidates.push({ value: rowMatch.label, sheetName: row.sheetName, rowIndex: row.rowIndex, columnIndex: firstColumn, matchLevel: rowMatch.level, label: rowMatch.label, evidence: "行内の日付分割候補" });
+      }
+    }
   });
   return candidates;
 }
 
-function findExcelGroupCandidates(rows) {
-  const candidates = [];
+function findGroupBlockCandidates(rows, dateCandidates) {
+  const bySheet = new Map();
   rows.forEach((row) => {
-    row.cells.forEach((cell) => {
-      if (!isGroupLikeCell(cell.value)) return;
-      candidates.push({ ...cell, sheetName: row.sheetName, rowIndex: row.rowIndex });
+    if (!bySheet.has(row.sheetName)) bySheet.set(row.sheetName, []);
+    bySheet.get(row.sheetName).push(row);
+  });
+
+  const blocks = [];
+  bySheet.forEach((sheetRows, sheetName) => {
+    const sortedRows = sheetRows.slice().sort((a, b) => a.rowIndex - b.rowIndex);
+    const groupRows = sortedRows.filter((row) => row.cells.some((cell) => isGroupLikeCell(cell.value)));
+    groupRows.forEach((row) => {
+      const groupCell = row.cells.find((cell) => isGroupLikeCell(cell.value));
+      if (!groupCell) return;
+      const start = Math.max(sortedRows[0].rowIndex, row.rowIndex - 2);
+      const end = Math.min(sortedRows.at(-1).rowIndex, row.rowIndex + 8);
+      const blockRows = sortedRows.filter((candidate) => candidate.rowIndex >= start && candidate.rowIndex <= end);
+      const nearestDate = findNearestDateCandidate(dateCandidates, groupCell, sheetName);
+      blocks.push({ sheetName, groupCell, startRow: start, endRow: end, rows: blockRows, nearestDate });
     });
   });
-  return candidates;
+  return dedupeBlocks(blocks);
 }
 
-function parseDateSectionEvents(rows, dateCandidates) {
-  const events = [];
-  dateCandidates.forEach((dateCell) => {
-    const blockRows = getRowsNear(rows, dateCell, { after: 12, before: 1, colRadius: 12 });
-    blockRows.forEach((row) => {
-      const event = rowToEvent(row, `${row.sheetName} ${row.rowIndex + 1}行目`, dateCell.matchLevel, `日付候補: ${dateCell.value}`);
-      if (hasEventContent(event)) events.push(event);
-    });
+function dedupeBlocks(blocks) {
+  const seen = new Set();
+  return blocks.filter((block) => {
+    const key = `${block.sheetName}:${block.groupCell.value}:${block.startRow}:${block.endRow}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
   });
-  return events;
 }
 
-function parseDateColumnEvents(rows, dateCandidates) {
-  const events = [];
-  dateCandidates.forEach((dateCell) => {
-    const sameSheetRows = rows.filter((row) => row.sheetName === dateCell.sheetName && row.rowIndex > dateCell.rowIndex && row.rowIndex <= dateCell.rowIndex + 36);
-    sameSheetRows.forEach((row) => {
-      const sameColumn = row.cells.find((cell) => cell.columnIndex === dateCell.columnIndex);
-      const nearbyCells = row.cells.filter((cell) => Math.abs(cell.columnIndex - dateCell.columnIndex) <= 4);
-      if (!sameColumn?.value && !nearbyCells.some((cell) => isTimeLikeCell(cell.value) || isActivityLikeCell(cell.value) || isPlaceLikeCell(cell.value) || isGroupLikeCell(cell.value))) return;
-      const leftLabels = row.cells.filter((cell) => cell.columnIndex < dateCell.columnIndex).map((cell) => cell.value);
-      const values = [...leftLabels, ...nearbyCells.map((cell) => cell.value)];
-      const event = eventFromValues(values, `${row.sheetName} ${row.rowIndex + 1}行目`, dateCell.matchLevel, `列見出し: ${dateCell.value}`);
-      if (hasEventContent(event)) events.push(event);
-    });
+function findNearestDateCandidate(dateCandidates, cell, sheetName) {
+  return dateCandidates
+    .filter((dateCell) => dateCell.sheetName === sheetName)
+    .map((dateCell) => ({
+      dateCell,
+      distance: Math.abs(dateCell.rowIndex - cell.rowIndex) + Math.min(Math.abs(dateCell.columnIndex - cell.columnIndex), 8),
+      rowDistance: Math.abs(dateCell.rowIndex - cell.rowIndex),
+    }))
+    .filter(({ distance, rowDistance }) => distance <= 22 || rowDistance <= 14)
+    .sort((a, b) => a.distance - b.distance)[0]?.dateCell || null;
+}
+
+function parseGroupBlockEvents(rows, dateCandidates, blockCandidates) {
+  return blockCandidates
+    .map((block) => blockToEvent(block, dateCandidates))
+    .filter(hasEventContent);
+}
+
+function blockToEvent(block) {
+  const values = block.rows.flatMap((row) => row.cells.map((cell) => cell.value));
+  const rowValues = block.rows.map((row) => row.cells.map((cell) => cell.value).join(" "));
+  const nearestDate = block.nearestDate;
+  const dateEvidence = nearestDate ? `${nearestDate.evidence || "日付候補"}: ${nearestDate.value}` : "日付一致なし";
+  const rawMatch = nearestDate?.matchLevel || "confirm";
+  const event = eventFromValues(values, `${block.sheetName} ${block.startRow + 1}-${block.endRow + 1}行目`, rawMatch, dateEvidence);
+  event.group = block.groupCell.value || event.group;
+  event.staff = findFirstByPredicate(rowValues, isStaffLikeText) || UNKNOWN;
+  event.note = buildBlockNote(event.note, rowValues);
+  const requiredMissing = [event.group, event.time, event.activity, event.place].includes(UNKNOWN);
+  if (!nearestDate) event.matchLevel = "confirm";
+  else if (nearestDate.matchLevel === "exact" && !requiredMissing) event.matchLevel = "exact";
+  else event.matchLevel = "candidate";
+  if (event.matchLevel !== "exact" && !event.evidence.includes(UNKNOWN)) event.evidence = `${event.evidence}（${UNKNOWN}）`;
+  return event;
+}
+
+function parseFallbackBlockCandidates(blockCandidates) {
+  return blockCandidates.slice(0, 3).map((block) => {
+    const event = blockToEvent({ ...block, nearestDate: null });
+    event.matchLevel = "confirm";
+    event.evidence = `日付一致なし。団体ブロック候補のみ（${UNKNOWN}）`;
+    return event;
   });
-  return events;
-}
-
-function parseProximityEvents(rows, dateCandidates, groupCandidates) {
-  const events = [];
-  groupCandidates.forEach((groupCell) => {
-    const nearestDate = dateCandidates
-      .filter((dateCell) => dateCell.sheetName === groupCell.sheetName)
-      .map((dateCell) => ({ dateCell, distance: Math.abs(dateCell.rowIndex - groupCell.rowIndex) + Math.abs(dateCell.columnIndex - groupCell.columnIndex) }))
-      .filter(({ distance }) => distance <= 14)
-      .sort((a, b) => a.distance - b.distance)[0]?.dateCell;
-    if (!nearestDate) return;
-    const row = rows.find((candidate) => candidate.sheetName === groupCell.sheetName && candidate.rowIndex === groupCell.rowIndex);
-    if (!row) return;
-    const values = [groupCell.value, ...row.cells.map((cell) => cell.value), ...getNeighborValues(rows, groupCell, 1, 5)];
-    const event = eventFromValues(values, `${row.sheetName} ${row.rowIndex + 1}行目`, nearestDate.matchLevel === "exact" ? "candidate" : "confirm", `近接推定: ${nearestDate.value}`);
-    if (hasEventContent(event)) events.push(event);
-  });
-  return events;
-}
-
-function parseFallbackGroupCandidates(groupCandidates) {
-  return groupCandidates.slice(0, 3).map((cell) => eventFromValues([cell.value], `${cell.sheetName} ${cell.rowIndex + 1}行目`, "confirm", "日付一致なし。団体候補のみ"));
-}
-
-function getRowsNear(rows, anchor, options) {
-  const before = options.before ?? 0;
-  const after = options.after ?? 0;
-  const colRadius = options.colRadius ?? 99;
-  return rows.filter((row) => row.sheetName === anchor.sheetName && row.rowIndex >= anchor.rowIndex - before && row.rowIndex <= anchor.rowIndex + after && row.cells.some((cell) => Math.abs(cell.columnIndex - anchor.columnIndex) <= colRadius));
-}
-
-function getNeighborValues(rows, anchor, rowRadius, colRadius) {
-  return rows
-    .filter((row) => row.sheetName === anchor.sheetName && Math.abs(row.rowIndex - anchor.rowIndex) <= rowRadius)
-    .flatMap((row) => row.cells)
-    .filter((cell) => Math.abs(cell.columnIndex - anchor.columnIndex) <= colRadius)
-    .map((cell) => cell.value);
-}
-
-function rowToEvent(row, source, matchLevel = "candidate", evidence = "行候補") {
-  return eventFromValues(row.cells.map((cell) => cell.value), source, matchLevel, evidence);
 }
 
 function eventFromValues(values, source, matchLevel = "candidate", evidence = "候補") {
   const meaningful = uniqueStrings(values).filter((value) => !isMetadataOnly(value));
-  if (!meaningful.length) return { group: UNKNOWN, time: UNKNOWN, activity: UNKNOWN, place: UNKNOWN, note: UNKNOWN, source, matchLevel: "confirm", evidence };
+  if (!meaningful.length) return { group: UNKNOWN, time: UNKNOWN, activity: UNKNOWN, place: UNKNOWN, staff: UNKNOWN, note: UNKNOWN, source, matchLevel: "confirm", evidence };
 
   const time = meaningful.find(isTimeLikeCell) || UNKNOWN;
   const place = meaningful.find(isPlaceLikeCell) || UNKNOWN;
   const activity = meaningful.find((value) => isActivityLikeCell(value) && value !== place) || UNKNOWN;
-  const group = meaningful.find((value) => value !== time && value !== place && value !== activity && isGroupLikeCell(value)) || UNKNOWN;
-  const note = meaningful.filter((value) => ![time, place, activity, group].includes(value)).join(" / ") || UNKNOWN;
+  const staff = meaningful.find(isStaffLikeText) || UNKNOWN;
+  const group = meaningful.find((value) => value !== time && value !== place && value !== activity && value !== staff && isGroupLikeCell(value)) || UNKNOWN;
+  const note = meaningful.filter((value) => ![time, place, activity, place, group, staff].includes(value)).join(" / ") || UNKNOWN;
   const needsConfirmation = [group, time, activity, place].includes(UNKNOWN) || matchLevel !== "exact";
-  return { group, time, activity, place, note, source, matchLevel: needsConfirmation ? (matchLevel === "exact" ? "candidate" : matchLevel) : "exact", evidence };
+  return { group, time, activity, place, staff, note, source, matchLevel: needsConfirmation ? (matchLevel === "exact" ? "candidate" : matchLevel) : "exact", evidence };
+}
+
+function buildBlockNote(existingNote, rowValues) {
+  const notes = rowValues.filter((value) => /備考|注意|持参|雨天|変更|確認/.test(value));
+  return uniqueStrings([existingNote, ...notes].filter((value) => value && value !== UNKNOWN)).join(" / ") || UNKNOWN;
+}
+
+function findFirstByPredicate(values, predicate) {
+  return values.map((value) => normalizeCell(value)).find(predicate) || "";
 }
 
 function hasEventContent(event) {
-  return [event.group, event.time, event.activity, event.place, event.note].some((value) => value && value !== UNKNOWN);
+  return [event.group, event.time, event.activity, event.place, event.staff, event.note].some((value) => value && value !== UNKNOWN);
 }
 
 function eventRank(event) {
@@ -598,6 +623,7 @@ function renderEvents() {
         <span><strong>時間</strong>：${escapeHtml(event.time)}</span>
         <span><strong>活動</strong>：${escapeHtml(event.activity)}</span>
         <span><strong>場所</strong>：${escapeHtml(event.place)}</span>
+        <span><strong>担当</strong>：${escapeHtml(event.staff || UNKNOWN)}</span>
         <span><strong>備考</strong>：${escapeHtml(event.note)}</span>
         <span><strong>根拠</strong>：${escapeHtml(event.evidence || UNKNOWN)}</span>
         <span><strong>抽出元</strong>：${escapeHtml(event.source)}</span>
@@ -611,6 +637,7 @@ function renderExcelLog() {
   elements.excelLog.innerHTML = `
     <strong>解析ログ</strong>
     <span>シート: ${escapeHtml(log.sheets.length ? log.sheets.join(" / ") : "未読み込み")}</span>
+    <span>結合セル補完: ${escapeHtml(log.usedMerges ? "あり" : "なし")}</span>
     <span>日付候補: ${escapeHtml(log.dateCandidates)}件</span>
     <span>団体候補: ${escapeHtml(log.groupCandidates)}件</span>
     <span>採用: ${escapeHtml(log.adopted)}件（完全一致 ${escapeHtml(log.exact)} / 候補あり ${escapeHtml(log.candidates)} / 要確認 ${escapeHtml(log.needConfirmation)}）</span>
@@ -711,6 +738,11 @@ function isPlaceLikeCell(value) {
 
 function isActivityLikeCell(value) {
   return /活動|研修|入所|退所|体験|講座|説明|式|会|炊飯|登山|散策|クラフト|オリエン|宿泊|朝食|昼食|夕食|清掃|準備|片付|受付|キャンプ/.test(normalizeCell(value));
+}
+
+function isStaffLikeText(value) {
+  const text = normalizeCell(value);
+  return /担当|職員|係|指導|所員|スタッフ/.test(text) && text.length <= 40;
 }
 
 function isGroupLikeCell(value) {

@@ -71,6 +71,13 @@ http://localhost:8000
 https://moufukana-debug.github.io/niigata-morning-dashboard/
 ```
 
+
+## 「タイトルだけ表示」になった場合の確認
+
+GitHub Pages の project site では、`/styles.css` や `/src/app.js` のような先頭スラッシュ付きパスにすると、`https://moufukana-debug.github.io/styles.css` のようにリポジトリ名なしの場所を見に行って失敗します。このアプリでは `./styles.css` と `./src/app.js` の相対パスを使います。
+
+また、`app.js` 自体が読み込めない場合は `app.js` の中に書いたエラー表示処理も実行されません。そのため、`index.html` 側に最小限の起動監視を置き、JavaScriptファイルの読み込み失敗・実行時エラー・初期化未完了を画面にも表示します。
+
 ## 使い方
 
 1. 「勤務予定表PDF」で `260429_R8.05月_勤務予定表.pdf` を選びます。

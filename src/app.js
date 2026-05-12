@@ -56,6 +56,7 @@ function init() {
   elements.excelInput.addEventListener("change", onExcelSelected);
   elements.memo.addEventListener("input", saveMemo);
   render();
+  window.NIIGATA_APP_READY = true;
 }
 
 function requireElements(keys) {
@@ -68,6 +69,10 @@ function requireElements(keys) {
 function showAppError(message, error) {
   console.error(message, error);
   const detail = error instanceof Error ? error.message : String(error || "原因不明のエラー");
+  if (window.NIIGATA_BOOT?.showError) {
+    window.NIIGATA_BOOT.showError(message, detail);
+    return;
+  }
   if (elements.appError) elements.appError.hidden = false;
   if (elements.appErrorDetail) elements.appErrorDetail.textContent = `${message} ${detail}`;
 }

@@ -7,6 +7,44 @@
     <title>朝の業務スタート画面 | 新潟県少年自然の家</title>
     <link rel="preconnect" href="https://cdnjs.cloudflare.com" />
     <link rel="stylesheet" href="./styles.css" />
+    <script>
+      window.NIIGATA_APP_READY = false;
+      window.NIIGATA_BOOT = {
+        showError(message, detail) {
+          console.error(message, detail || "");
+          const render = () => {
+            const errorBox = document.querySelector("#app-error");
+            const errorDetail = document.querySelector("#app-error-detail");
+            if (errorBox) errorBox.hidden = false;
+            if (errorDetail) errorDetail.textContent = `${message} ${detail || ""}`.trim();
+          };
+          if (document.readyState === "loading") {
+            document.addEventListener("DOMContentLoaded", render, { once: true });
+          } else {
+            render();
+          }
+        },
+      };
+      window.addEventListener("error", (event) => {
+        const target = event.target;
+        if (target && target.tagName === "SCRIPT") {
+          window.NIIGATA_BOOT.showError("JavaScriptファイルの読み込みに失敗しました。", target.src);
+          return;
+        }
+        window.NIIGATA_BOOT.showError("JavaScriptの実行中にエラーが発生しました。", event.message || "詳細はブラウザのConsoleを確認してください。");
+      }, true);
+      window.addEventListener("unhandledrejection", (event) => {
+        const reason = event.reason instanceof Error ? event.reason.message : String(event.reason || "原因不明のエラー");
+        window.NIIGATA_BOOT.showError("非同期処理に失敗しました。", reason);
+      });
+      window.addEventListener("load", () => {
+        window.setTimeout(() => {
+          if (!window.NIIGATA_APP_READY) {
+            window.NIIGATA_BOOT.showError("アプリ本体の初期化が完了しませんでした。", "./src/app.js のパス、GitHub Pagesの公開ブランチ、Consoleのエラーを確認してください。");
+          }
+        }, 2500);
+      });
+    </script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
     <script src="./src/app.js" defer></script>
   </head>

@@ -7,12 +7,22 @@
     <title>朝の業務スタート画面 | 新潟県少年自然の家</title>
     <link rel="preconnect" href="https://cdnjs.cloudflare.com" />
     <link rel="stylesheet" href="./styles.css" />
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs" type="module"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
-    <script src="./src/app.js" type="module"></script>
+    <script src="./src/app.js" defer></script>
   </head>
   <body>
     <main class="app-shell" aria-label="朝の業務スタート画面">
+      <noscript>
+        <section class="app-error card" role="alert">
+          JavaScriptが無効です。ブラウザ設定でJavaScriptを有効にしてから再読み込みしてください。
+        </section>
+      </noscript>
+
+      <section id="app-error" class="app-error card" role="alert" hidden>
+        <strong>読み込みに失敗しました。</strong>
+        <span id="app-error-detail">ブラウザの再読み込みを試してください。</span>
+      </section>
+
       <section class="hero card glass" aria-labelledby="today-title">
         <div>
           <p class="eyebrow">Niigata Morning</p>

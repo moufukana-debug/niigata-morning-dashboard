@@ -62,6 +62,15 @@ python3 -m http.server 8000
 http://localhost:8000
 ```
 
+
+### GitHub Pages project siteで開く場合
+
+このリポジトリは project site として、次のURLで動く前提です。CSSとJavaScriptは `./styles.css` と `./src/app.js` の相対パスで読み込みます。
+
+```text
+https://moufukana-debug.github.io/niigata-morning-dashboard/
+```
+
 ## 使い方
 
 1. 「勤務予定表PDF」で `260429_R8.05月_勤務予定表.pdf` を選びます。

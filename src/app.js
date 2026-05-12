@@ -1,3 +1,5 @@
+"use strict";
+
 const STAFF_NAME = "西村";
 const MEMO_KEY = "niigataMorning.memo";
 const TASK_KEY_PREFIX = "niigataMorning.tasks.";
@@ -14,6 +16,8 @@ const state = {
 };
 
 const elements = {
+  appError: document.querySelector("#app-error"),
+  appErrorDetail: document.querySelector("#app-error-detail"),
   todayLabel: document.querySelector("#today-label"),
   dateInput: document.querySelector("#date-input"),
   pdfInput: document.querySelector("#pdf-input"),
@@ -29,17 +33,45 @@ const elements = {
   memoStatus: document.querySelector("#memo-status"),
 };
 
-init();
+window.addEventListener("error", (event) => {
+  showAppError("JavaScriptの実行中にエラーが発生しました。", event.error || event.message);
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  showAppError("非同期処理の読み込みに失敗しました。", event.reason);
+});
+
+try {
+  init();
+} catch (error) {
+  showAppError("アプリの初期表示に失敗しました。", error);
+}
 
 function init() {
+  requireElements(["todayLabel", "dateInput", "pdfInput", "excelInput", "pdfStatus", "excelStatus", "workSummary", "attentionList", "taskList", "eventsList", "basicInfo", "memo", "memoStatus"]);
   elements.dateInput.value = toInputDate(state.selectedDate);
-  elements.memo.value = localStorage.getItem(MEMO_KEY) || "";
+  elements.memo.value = getStorageItem(MEMO_KEY) || "";
   elements.dateInput.addEventListener("change", onDateChange);
   elements.pdfInput.addEventListener("change", onPdfSelected);
   elements.excelInput.addEventListener("change", onExcelSelected);
   elements.memo.addEventListener("input", saveMemo);
   render();
 }
+
+function requireElements(keys) {
+  const missing = keys.filter((key) => !elements[key]);
+  if (missing.length > 0) {
+    throw new Error(`画面部品が見つかりません: ${missing.join(", ")}`);
+  }
+}
+
+function showAppError(message, error) {
+  console.error(message, error);
+  const detail = error instanceof Error ? error.message : String(error || "原因不明のエラー");
+  if (elements.appError) elements.appError.hidden = false;
+  if (elements.appErrorDetail) elements.appErrorDetail.textContent = `${message} ${detail}`;
+}
+
 
 function onDateChange(event) {
   const nextDate = new Date(`${event.target.value}T00:00:00`);
@@ -56,7 +88,7 @@ async function onPdfSelected(event) {
     state.pdfText = await extractPdfText(file);
     elements.pdfStatus.textContent = `${file.name} を読み込みました`;
   } catch (error) {
-    console.error(error);
+    showAppError("PDFを読み込めませんでした。", error);
     state.pdfText = "";
     elements.pdfStatus.textContent = "PDFを読み込めませんでした（要確認）";
   }
@@ -71,7 +103,7 @@ async function onExcelSelected(event) {
     state.workbookRows = await extractWorkbookRows(file);
     elements.excelStatus.textContent = `${file.name} を読み込みました`;
   } catch (error) {
-    console.error(error);
+    showAppError("Excelを読み込めませんでした。", error);
     state.workbookRows = [];
     elements.excelStatus.textContent = "Excelを読み込めませんでした（要確認）";
   }
@@ -188,7 +220,7 @@ function findNearbyDateValue(lines, staffLine, date) {
   const day = String(date.getDate());
   const candidate = lines.slice(Math.max(0, staffLineIndex - 2), staffLineIndex + 3).find((line) => line.includes(day) && line.includes(STAFF_NAME));
   if (!candidate) return "";
-  const match = candidate.match(new RegExp(`${day}[^\n]{0,12}(${STAFF_NAME})?\s*([^\s]{1,8})`));
+  const match = candidate.match(new RegExp(`${day}[^\\n]{0,12}(${STAFF_NAME})?\\s*([^\\s]{1,8})`));
   return match?.[2] || "";
 }
 
@@ -277,7 +309,7 @@ function renderWarnings() {
 
 function renderTasks() {
   const key = `${TASK_KEY_PREFIX}${toInputDate(state.selectedDate)}`;
-  const saved = JSON.parse(localStorage.getItem(key) || "{}");
+  const saved = getStorageJson(key, {});
   elements.taskList.innerHTML = DEFAULT_TASKS.map((task, index) => `
     <label class="task-item">
       <input type="checkbox" data-task-index="${index}" ${saved[index] ? "checked" : ""} />
@@ -286,9 +318,9 @@ function renderTasks() {
   `).join("");
   elements.taskList.querySelectorAll("input").forEach((input) => {
     input.addEventListener("change", () => {
-      const next = JSON.parse(localStorage.getItem(key) || "{}");
+      const next = getStorageJson(key, {});
       next[input.dataset.taskIndex] = input.checked;
-      localStorage.setItem(key, JSON.stringify(next));
+      setStorageItem(key, JSON.stringify(next));
     });
   });
 }
@@ -329,7 +361,7 @@ function renderBasicInfo() {
 }
 
 function saveMemo() {
-  localStorage.setItem(MEMO_KEY, elements.memo.value);
+  setStorageItem(MEMO_KEY, elements.memo.value);
   elements.memoStatus.textContent = "保存しました。";
   clearTimeout(saveMemo.timer);
   saveMemo.timer = setTimeout(() => {
@@ -353,6 +385,34 @@ function buildDateTokens(date, options = {}) {
   ];
   if (includeBareDay) tokens.push(`${day}`);
   return tokens;
+}
+
+function getStorageItem(key) {
+  try {
+    return window.localStorage.getItem(key);
+  } catch (error) {
+    showAppError("ブラウザの保存領域を読み取れませんでした。", error);
+    return null;
+  }
+}
+
+function setStorageItem(key, value) {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch (error) {
+    showAppError("ブラウザの保存領域に保存できませんでした。", error);
+  }
+}
+
+function getStorageJson(key, fallback) {
+  const raw = getStorageItem(key);
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    showAppError("保存済みチェック項目の読み込みに失敗しました。", error);
+    return fallback;
+  }
 }
 
 function normalizeCell(value) {

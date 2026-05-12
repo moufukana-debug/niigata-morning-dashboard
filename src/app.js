@@ -16,6 +16,7 @@ const state = {
   attention: [],
   confirmations: ["資料未読み込みのため要確認"],
   excelLog: createEmptyExcelLog(),
+  excelDebug: createEmptyExcelDebug(),
 };
 
 const elements = {
@@ -33,6 +34,7 @@ const elements = {
   taskList: document.querySelector("#task-list"),
   eventsList: document.querySelector("#events-list"),
   excelLog: document.querySelector("#excel-log"),
+  excelDebug: document.querySelector("#excel-debug"),
   basicInfo: document.querySelector("#basic-info"),
   memo: document.querySelector("#memo"),
   memoStatus: document.querySelector("#memo-status"),
@@ -53,7 +55,7 @@ try {
 }
 
 function init() {
-  requireElements(["todayLabel", "dateInput", "pdfInput", "excelInput", "pdfStatus", "excelStatus", "workSummary", "attentionList", "confirmationList", "taskList", "eventsList", "excelLog", "basicInfo", "memo", "memoStatus"]);
+  requireElements(["todayLabel", "dateInput", "pdfInput", "excelInput", "pdfStatus", "excelStatus", "workSummary", "attentionList", "confirmationList", "taskList", "eventsList", "excelLog", "excelDebug", "basicInfo", "memo", "memoStatus"]);
   elements.dateInput.value = toInputDate(state.selectedDate);
   elements.memo.value = getStorageItem(MEMO_KEY) || "";
   elements.dateInput.addEventListener("change", onDateChange);
@@ -108,12 +110,17 @@ async function onExcelSelected(event) {
   elements.excelStatus.textContent = "Excelを解析中...";
   try {
     const fileKind = getExcelFileKind(file);
+    state.excelDebug = createExcelDebugFromFile(file, fileKind);
+    renderExcelDebug();
     state.workbookRows = await extractWorkbookRows(file);
+    state.excelDebug = state.workbookRows.debug || state.excelDebug;
     elements.excelStatus.textContent = `✅ ${file.name}（${fileKind.label} / ${state.workbookRows.length}行）`;
   } catch (error) {
     showAppError("Excelを読み込めませんでした。", error);
     state.workbookRows = [];
     state.excelLog = createEmptyExcelLog();
+    state.excelDebug = error.debug || state.excelDebug || createEmptyExcelDebug();
+    state.excelDebug.error = error instanceof Error ? error.message : String(error);
     elements.excelStatus.textContent = formatExcelReadError(error);
   }
   refreshDerivedData();
@@ -156,28 +163,47 @@ function groupTextItemsByRow(items) {
 }
 
 async function extractWorkbookRows(file) {
-  getExcelFileKind(file);
+  const fileKind = getExcelFileKind(file);
+  const debug = createExcelDebugFromFile(file, fileKind);
   await waitForXlsx();
 
   try {
+    debug.fileReadStatus = "読込中";
     const data = await file.arrayBuffer();
+    debug.fileReadStatus = "成功";
+    debug.workbookStatus = "生成中";
     const workbook = XLSX.read(data, { type: "array", cellDates: true, bookVBA: false });
-    if (!workbook.SheetNames?.length) throw new ExcelParseError("シートが見つかりませんでした");
+    debug.workbookStatus = "成功";
+    if (!workbook.SheetNames?.length) throw new ExcelParseError("シートが見つかりませんでした", debug);
 
     const sheets = workbook.SheetNames.map((sheetName) => sheetToFilledSheet(sheetName, workbook.Sheets[sheetName]));
     const parsedRows = sheets.flatMap((sheet) => sheet.rows);
     parsedRows.sheets = sheets;
     parsedRows.usedMerges = sheets.some((sheet) => sheet.usedMerges);
-    if (!parsedRows.some((row) => row.cells.length > 0)) throw new ExcelParseError("セルデータを読み取れませんでした");
+    debug.sheetStatus = "成功";
+    debug.sheetNames = workbook.SheetNames;
+    debug.usedMerges = parsedRows.usedMerges;
+    debug.sheetSummaries = sheets.map((sheet) => ({
+      name: sheet.sheetName,
+      rowCount: sheet.rowCount,
+      columnCount: sheet.columnCount,
+      nonEmptyRows: sheet.rows.length,
+      mergeCount: sheet.mergeCount,
+    }));
+    debug.preview = buildExcelPreview(sheets[0]);
+    if (!parsedRows.some((row) => row.cells.length > 0)) throw new ExcelParseError("セルデータを読み取れませんでした", debug);
+    debug.analysisStatus = "団体抽出前：セル読取成功";
+    parsedRows.debug = debug;
     return parsedRows;
   } catch (error) {
     if (error instanceof ExcelFileTypeError || error instanceof ExcelParseError) throw error;
-    throw new ExcelParseError(error instanceof Error ? error.message : String(error));
+    if (debug.fileReadStatus !== "成功") throw new ExcelParseError(`ファイル読込失敗: ${error instanceof Error ? error.message : String(error)}`, debug);
+    throw new ExcelParseError(error instanceof Error ? error.message : String(error), debug);
   }
 }
 
 function sheetToFilledSheet(sheetName, sheet) {
-  if (!sheet?.["!ref"]) return { sheetName, rows: [], grid: [], usedMerges: false };
+  if (!sheet?.["!ref"]) return { sheetName, rows: [], grid: [], usedMerges: false, mergeCount: 0, rowCount: 0, columnCount: 0 };
   const range = XLSX.utils.decode_range(sheet["!ref"]);
   const filled = new Map();
   const original = new Set();
@@ -218,7 +244,64 @@ function sheetToFilledSheet(sheetName, sheet) {
     }
     if (cells.length) rows.push({ sheetName, rowIndex: row, cells });
   }
-  return { sheetName, rows, grid, usedMerges: Boolean(sheet["!merges"]?.length) };
+  return {
+    sheetName,
+    rows,
+    grid,
+    usedMerges: Boolean(sheet["!merges"]?.length),
+    mergeCount: sheet["!merges"]?.length || 0,
+    rowCount: range.e.r - range.s.r + 1,
+    columnCount: range.e.c - range.s.c + 1,
+  };
+}
+
+function createEmptyExcelDebug() {
+  return {
+    fileName: "未選択",
+    extension: "-",
+    sizeLabel: "-",
+    fileReadStatus: "未実行",
+    workbookStatus: "未実行",
+    sheetStatus: "未実行",
+    sheetNames: [],
+    usedMerges: false,
+    sheetSummaries: [],
+    preview: null,
+    analysisStatus: "未実行",
+    error: "",
+  };
+}
+
+function createExcelDebugFromFile(file, fileKind) {
+  return {
+    ...createEmptyExcelDebug(),
+    fileName: file.name,
+    extension: fileKind.extension,
+    sizeLabel: formatFileSize(file.size),
+    fileReadStatus: "未実行",
+    workbookStatus: "未実行",
+    sheetStatus: "未実行",
+  };
+}
+
+function buildExcelPreview(sheet) {
+  if (!sheet) return null;
+  const previewRows = [];
+  for (let rowIndex = 0; rowIndex < sheet.grid.length && previewRows.length < 20; rowIndex += 1) {
+    const row = sheet.grid[rowIndex] || [];
+    const values = row.map((value) => normalizeCell(value));
+    const nonEmptyValues = values.filter(Boolean);
+    if (!nonEmptyValues.length) continue;
+    previewRows.push({ rowNumber: rowIndex + 1, nonEmptyCount: nonEmptyValues.length, values: nonEmptyValues.slice(0, 12) });
+  }
+  return { sheetName: sheet.sheetName, mergeCount: sheet.mergeCount, rows: previewRows };
+}
+
+function formatFileSize(size) {
+  if (!Number.isFinite(size)) return "不明";
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / 1024 / 1024).toFixed(2)} MB`;
 }
 class ExcelFileTypeError extends Error {
   constructor(message) {
@@ -228,9 +311,10 @@ class ExcelFileTypeError extends Error {
 }
 
 class ExcelParseError extends Error {
-  constructor(message) {
+  constructor(message, debug = null) {
     super(message);
     this.name = "ExcelParseError";
+    this.debug = debug;
   }
 }
 
@@ -276,6 +360,7 @@ function refreshDerivedData() {
   const excelResult = parseEventsFromWorkbook(state.workbookRows, state.selectedDate);
   state.events = excelResult.events;
   state.excelLog = excelResult.log;
+  state.excelDebug.analysisStatus = state.workbookRows.length ? (state.events.length ? `団体抽出成功（${state.events.length}件）` : `団体抽出失敗（${UNKNOWN}）`) : state.excelDebug.analysisStatus;
   state.confirmations = buildConfirmations();
   render();
 }
@@ -556,6 +641,7 @@ function render() {
   renderTasks();
   renderEvents();
   renderExcelLog();
+  renderExcelDebug();
   renderBasicInfo();
 }
 
@@ -642,6 +728,34 @@ function renderExcelLog() {
     <span>団体候補: ${escapeHtml(log.groupCandidates)}件</span>
     <span>採用: ${escapeHtml(log.adopted)}件（完全一致 ${escapeHtml(log.exact)} / 候補あり ${escapeHtml(log.candidates)} / 要確認 ${escapeHtml(log.needConfirmation)}）</span>
     <span>状態: ${escapeHtml(log.mode)}</span>
+  `;
+}
+
+function renderExcelDebug() {
+  const debug = state.excelDebug || createEmptyExcelDebug();
+  const sheetSummary = debug.sheetSummaries.length
+    ? debug.sheetSummaries.map((sheet) => `<li>${escapeHtml(sheet.name)}：${escapeHtml(sheet.rowCount)}行 × ${escapeHtml(sheet.columnCount)}列 / 非空行 ${escapeHtml(sheet.nonEmptyRows)} / 結合 ${escapeHtml(sheet.mergeCount)}</li>`).join("")
+    : "<li>シート未検出</li>";
+  const preview = debug.preview
+    ? `
+      <div class="preview-box">
+        <strong>先頭シートプレビュー：${escapeHtml(debug.preview.sheetName)}（結合セル ${escapeHtml(debug.preview.mergeCount)}件）</strong>
+        ${debug.preview.rows.map((row) => `<div class="preview-row"><b>${escapeHtml(row.rowNumber)}行目</b> 非空${escapeHtml(row.nonEmptyCount)}：${escapeHtml(row.values.join(" / "))}</div>`).join("") || "<div>表示できるセルがありません</div>"}
+      </div>
+    `
+    : "<div class=\"preview-box\">プレビュー未作成</div>";
+
+  elements.excelDebug.innerHTML = `
+    <strong>読込デバッグ</strong>
+    <span>ファイル名: ${escapeHtml(debug.fileName)}</span>
+    <span>拡張子: ${escapeHtml(debug.extension)} / サイズ: ${escapeHtml(debug.sizeLabel)}</span>
+    <span>ファイル読込: ${escapeHtml(debug.fileReadStatus)} / Workbook生成: ${escapeHtml(debug.workbookStatus)} / シート検出: ${escapeHtml(debug.sheetStatus)}</span>
+    <span>シート名: ${escapeHtml(debug.sheetNames.length ? debug.sheetNames.join(" / ") : "未検出")}</span>
+    <span>結合セル補完: ${escapeHtml(debug.usedMerges ? "あり" : "なし")}</span>
+    <span>解析段階: ${escapeHtml(debug.analysisStatus)}</span>
+    ${debug.error ? `<span>エラー: ${escapeHtml(debug.error)}</span>` : ""}
+    <ul>${sheetSummary}</ul>
+    ${preview}
   `;
 }
 

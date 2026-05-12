@@ -294,3 +294,26 @@ textarea { min-height: 132px; padding: 14px; resize: vertical; line-height: 1.7;
 .event-card.confirm {
   border-color: rgba(199, 151, 84, 0.36);
 }
+
+.excel-debug ul {
+  margin: 4px 0 0;
+  padding-left: 1.2em;
+}
+
+.preview-box {
+  display: grid;
+  gap: 4px;
+  max-height: 260px;
+  overflow: auto;
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(255, 253, 248, 0.86);
+}
+
+.preview-row {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  color: var(--text);
+  line-height: 1.45;
+}

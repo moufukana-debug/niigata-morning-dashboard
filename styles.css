@@ -207,3 +207,46 @@ textarea { min-height: 132px; padding: 14px; resize: vertical; line-height: 1.7;
   margin-bottom: 4px;
   color: var(--brown-deep);
 }
+
+.dashboard-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.confirmation-list li {
+  background: #fffaf0;
+  border-left-color: #c79754;
+}
+
+.step-badge.confirm {
+  color: #fffaf3;
+  background: #c79754;
+}
+
+@media (min-width: 860px) {
+  .app-shell {
+    width: min(100%, 980px);
+    padding-inline: 24px;
+  }
+
+  .dashboard-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .setup-card,
+  .hero,
+  .events-card,
+  .memo-card {
+    grid-column: 1 / -1;
+  }
+
+  .card {
+    margin: 0;
+  }
+
+  .setup-card,
+  .hero {
+    margin-bottom: 14px;
+  }
+}

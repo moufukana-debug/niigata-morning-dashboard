@@ -96,56 +96,68 @@
         </label>
       </section>
 
-      <section class="card priority-card" aria-labelledby="work-title">
-        <div class="section-heading compact">
-          <span class="step-badge primary">まず見る</span>
-          <h2 id="work-title">今日の勤務</h2>
-        </div>
-        <div id="work-summary" class="summary-box empty-state">PDFを読み込むと、西村さんの勤務情報を表示します。</div>
-      </section>
+      <div class="dashboard-grid">
+        <section class="card priority-card" aria-labelledby="work-title">
+          <div class="section-heading compact">
+            <span class="step-badge primary">まず見る</span>
+            <h2 id="work-title">今日の勤務</h2>
+          </div>
+          <div id="work-summary" class="summary-box empty-state">PDFを読み込むと、西村さんの勤務情報を表示します。</div>
+        </section>
 
-      <section class="card attention-card" aria-labelledby="attention-title">
-        <div class="section-heading compact">
-          <span class="step-badge warn">注意</span>
-          <h2 id="attention-title">注意点</h2>
-        </div>
-        <ul id="attention-list" class="attention-list">
-          <li>資料未読み込みのため要確認</li>
-        </ul>
-      </section>
+        <section class="card attention-card" aria-labelledby="attention-title">
+          <div class="section-heading compact">
+            <span class="step-badge warn">注意</span>
+            <h2 id="attention-title">注意点</h2>
+          </div>
+          <ul id="attention-list" class="attention-list">
+            <li>資料未読み込みのため要確認</li>
+          </ul>
+        </section>
 
-      <section class="card" aria-labelledby="tasks-title">
-        <div class="section-heading compact">
-          <span class="step-badge">3つだけ</span>
-          <h2 id="tasks-title">最初にやること</h2>
-        </div>
-        <div id="task-list" class="task-list"></div>
-      </section>
+        <section class="card confirmation-card" aria-labelledby="confirmation-title">
+          <div class="section-heading compact">
+            <span class="step-badge confirm">要確認</span>
+            <h2 id="confirmation-title">要確認</h2>
+          </div>
+          <ul id="confirmation-list" class="attention-list confirmation-list">
+            <li>資料未読み込みのため要確認</li>
+          </ul>
+        </section>
 
-      <section class="card" aria-labelledby="events-title">
-        <div class="section-heading compact">
-          <span class="step-badge">団体</span>
-          <h2 id="events-title">今日の団体・行事</h2>
-        </div>
-        <div id="events-list" class="events-list empty-state">Excelを読み込むと、今日の団体・活動を表示します。</div>
-      </section>
+        <section class="card events-card" aria-labelledby="events-title">
+          <div class="section-heading compact">
+            <span class="step-badge">団体</span>
+            <h2 id="events-title">今日の団体・行事</h2>
+          </div>
+          <div id="events-list" class="events-list empty-state">Excelを読み込むと、今日の団体・活動を表示します。</div>
+        </section>
 
-      <section class="card" aria-labelledby="basic-title">
-        <div class="section-heading compact">
-          <span class="step-badge">基本</span>
-          <h2 id="basic-title">今日の基本情報</h2>
-        </div>
-        <dl id="basic-info" class="info-list"></dl>
-      </section>
+        <section class="card" aria-labelledby="tasks-title">
+          <div class="section-heading compact">
+            <span class="step-badge">3つだけ</span>
+            <h2 id="tasks-title">最初にやること</h2>
+          </div>
+          <div id="task-list" class="task-list"></div>
+        </section>
 
-      <section class="card memo-card" aria-labelledby="memo-title">
-        <div class="section-heading compact">
-          <span class="step-badge">メモ</span>
-          <h2 id="memo-title">ひとことメモ</h2>
-        </div>
-        <textarea id="memo" rows="5" placeholder="例：朝礼で確認すること、気になったこと"></textarea>
-        <p class="save-note" id="memo-status">入力すると自動保存します。</p>
-      </section>
+        <section class="card" aria-labelledby="basic-title">
+          <div class="section-heading compact">
+            <span class="step-badge">基本</span>
+            <h2 id="basic-title">今日の基本情報</h2>
+          </div>
+          <dl id="basic-info" class="info-list"></dl>
+        </section>
+
+        <section class="card memo-card" aria-labelledby="memo-title">
+          <div class="section-heading compact">
+            <span class="step-badge">メモ</span>
+            <h2 id="memo-title">ひとことメモ</h2>
+          </div>
+          <textarea id="memo" rows="5" placeholder="例：朝礼で確認すること、気になったこと"></textarea>
+          <p class="save-note" id="memo-status">入力すると自動保存します。</p>
+        </section>
+      </div>
     </main>
   </body>
 </html>

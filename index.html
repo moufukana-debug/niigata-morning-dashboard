@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#d8c4ad" />
+    <title>朝の業務スタート画面 | 新潟県少年自然の家</title>
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com" />
+    <link rel="stylesheet" href="./styles.css" />
+    <script>
+      window.NIIGATA_APP_READY = false;
+      window.NIIGATA_BOOT = {
+        showError(message, detail) {
+          console.error(message, detail || "");
+          const render = () => {
+            const errorBox = document.querySelector("#app-error");
+            const errorDetail = document.querySelector("#app-error-detail");
+            if (errorBox) errorBox.hidden = false;
+            if (errorDetail) errorDetail.textContent = `${message} ${detail || ""}`.trim();
+          };
+          if (document.readyState === "loading") {
+            document.addEventListener("DOMContentLoaded", render, { once: true });
+          } else {
+            render();
+          }
+        },
+      };
+      window.addEventListener("error", (event) => {
+        const target = event.target;
+        if (target && target.tagName === "SCRIPT") {
+          window.NIIGATA_BOOT.showError("JavaScriptファイルの読み込みに失敗しました。", target.src);
+          return;
+        }
+        window.NIIGATA_BOOT.showError("JavaScriptの実行中にエラーが発生しました。", event.message || "詳細はブラウザのConsoleを確認してください。");
+      }, true);
+      window.addEventListener("unhandledrejection", (event) => {
+        const reason = event.reason instanceof Error ? event.reason.message : String(event.reason || "原因不明のエラー");
+        window.NIIGATA_BOOT.showError("非同期処理に失敗しました。", reason);
+      });
+      window.addEventListener("load", () => {
+        window.setTimeout(() => {
+          if (!window.NIIGATA_APP_READY) {
+            window.NIIGATA_BOOT.showError("アプリ本体の初期化が完了しませんでした。", "./src/app.js のパス、GitHub Pagesの公開ブランチ、Consoleのエラーを確認してください。");
+          }
+        }, 2500);
+      });
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
+    <script src="./src/app.js" defer></script>
+  </head>
+  <body>
+    <main class="app-shell" aria-label="朝の業務スタート画面">
+      <noscript>
+        <section class="app-error card" role="alert">
+          JavaScriptが無効です。ブラウザ設定でJavaScriptを有効にしてから再読み込みしてください。
+        </section>
+      </noscript>
+
+      <section id="app-error" class="app-error card" role="alert" hidden>
+        <strong>読み込みに失敗しました。</strong>
+        <span id="app-error-detail">ブラウザの再読み込みを試してください。</span>
+      </section>
+
+      <section class="hero card glass" aria-labelledby="today-title">
+        <div>
+          <p class="eyebrow">Niigata Morning</p>
+          <h1 id="today-title">朝の業務スタート画面</h1>
+          <p class="hero__date" id="today-label">今日の日付を確認中...</p>
+        </div>
+        <div class="person-chip" aria-label="対象職員">西村</div>
+      </section>
+
+      <section class="card setup-card" aria-labelledby="setup-title">
+        <div class="section-heading">
+          <span class="step-badge">準備</span>
+          <div>
+            <h2 id="setup-title">資料を読み込む</h2>
+            <p>勤務予定表PDFと調整プログラムExcelを選ぶと、今日の情報だけ表示します。</p>
+          </div>
+        </div>
+        <div class="file-grid">
+          <label class="file-picker">
+            <span>勤務予定表PDF</span>
+            <input id="pdf-input" type="file" accept="application/pdf,.pdf" />
+            <small id="pdf-status">未読み込み</small>
+          </label>
+          <label class="file-picker">
+            <span>調整プログラムExcel</span>
+            <input id="excel-input" type="file" accept=".xlsx,.xls,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/vnd.ms-excel.sheet.macroEnabled.12" />
+            <small id="excel-status">未読み込み</small>
+          </label>
+        </div>
+        <label class="date-control">
+          <span>確認する日付</span>
+          <input id="date-input" type="date" />
+        </label>
+      </section>
+
+      <div class="dashboard-grid">
+        <section class="card priority-card" aria-labelledby="work-title">
+          <div class="section-heading compact">
+            <span class="step-badge primary">まず見る</span>
+            <h2 id="work-title">今日の勤務</h2>
+          </div>
+          <div id="work-summary" class="summary-box empty-state">PDFを読み込むと、西村さんの勤務情報を表示します。</div>
+        </section>
+
+        <section class="card attention-card" aria-labelledby="attention-title">
+          <div class="section-heading compact">
+            <span class="step-badge warn">注意</span>
+            <h2 id="attention-title">注意点</h2>
+          </div>
+          <ul id="attention-list" class="attention-list">
+            <li>資料未読み込みのため要確認</li>
+          </ul>
+        </section>
+
+        <section class="card confirmation-card" aria-labelledby="confirmation-title">
+          <div class="section-heading compact">
+            <span class="step-badge confirm">要確認</span>
+            <h2 id="confirmation-title">要確認</h2>
+          </div>
+          <ul id="confirmation-list" class="attention-list confirmation-list">
+            <li>資料未読み込みのため要確認</li>
+          </ul>
+        </section>
+
+        <section class="card events-card" aria-labelledby="events-title">
+          <div class="section-heading compact">
+            <span class="step-badge">団体</span>
+            <h2 id="events-title">今日の団体・行事</h2>
+          </div>
+          <div id="events-list" class="events-list empty-state">Excelを読み込むと、今日の団体・活動を表示します。</div>
+          <div id="excel-log" class="analysis-log" aria-live="polite">解析ログ：Excel未読み込み</div>
+        </section>
+
+        <section class="card" aria-labelledby="tasks-title">
+          <div class="section-heading compact">
+            <span class="step-badge">3つだけ</span>
+            <h2 id="tasks-title">最初にやること</h2>
+          </div>
+          <div id="task-list" class="task-list"></div>
+        </section>
+
+        <section class="card" aria-labelledby="basic-title">
+          <div class="section-heading compact">
+            <span class="step-badge">基本</span>
+            <h2 id="basic-title">今日の基本情報</h2>
+          </div>
+          <dl id="basic-info" class="info-list"></dl>
+        </section>
+
+        <section class="card memo-card" aria-labelledby="memo-title">
+          <div class="section-heading compact">
+            <span class="step-badge">メモ</span>
+            <h2 id="memo-title">ひとことメモ</h2>
+          </div>
+          <textarea id="memo" rows="5" placeholder="例：朝礼で確認すること、気になったこと"></textarea>
+          <p class="save-note" id="memo-status">入力すると自動保存します。</p>
+        </section>
+      </div>
+    </main>
+  </body>
+</html>

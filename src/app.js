@@ -226,7 +226,7 @@ function sheetToFilledSheet(sheetName, sheet) {
   for (let row = range.s.r; row <= range.e.r; row += 1) {
     for (let column = range.s.c; column <= range.e.c; column += 1) {
       const address = XLSX.utils.encode_cell({ r: row, c: column });
-      const value = normalizeCell(sheet[address]?.v ?? sheet[address]?.w ?? "");
+      const value = normalizeSheetCellValue(sheet[address]);
       if (!value) continue;
       filled.set(`${row}:${column}`, value);
       original.add(`${row}:${column}`);
@@ -946,22 +946,22 @@ function extractTextInBounds(items, bounds, excludeTexts) {
 }
 
 function isDateHeaderText(value, date) {
-  const text = normalizeCell(value).replace(/[（）()]/g, "");
+  const text = normalizeDateText(value);
   const month = date.getMonth() + 1;
   const day = date.getDate();
   return text === String(day) || text === `${day}日` || text === `${month}/${day}` || text === `${month}月${day}日`;
 }
 
 function getDateMatchLevel(value, date) {
-  const text = normalizeCell(value).replace(/[（）()\s]/g, "");
+  const text = normalizeDateText(value);
   if (!text) return null;
   const month = date.getMonth() + 1;
   const day = date.getDate();
   const weekday = WEEKDAYS[date.getDay()];
-  const exactTokens = [`${date.getFullYear()}/${month}/${day}`, `${date.getFullYear()}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`, `${month}/${day}`, `${month}月${day}日`, `${day}日`];
+  const exactTokens = buildDateTokens(date, { includeBareDay: false }).map(normalizeDateText);
   if (exactTokens.some((token) => text === token || text.includes(token))) return { level: "exact", label: text };
   if (text === String(day)) return { level: "candidate", label: text };
-  if (text === weekday || text.includes(`(${weekday})`) || text.includes(`（${weekday}）`)) return { level: "confirm", label: text };
+  if (text === weekday) return { level: "confirm", label: text };
   return null;
 }
 
@@ -1003,7 +1003,7 @@ function isExcelDateCell(value, date) {
 }
 
 function isAnyDateLikeCell(value) {
-  return /\d{1,2}月\d{1,2}日|\d{4}[/-]\d{1,2}[/-]\d{1,2}|\d{1,2}[/-]\d{1,2}|^\d{1,2}日$|^\d{1,2}$|^[日月火水木金土]$/.test(normalizeCell(value));
+  return /(?:R|令和)\d{1,2}[年./-]\d{1,2}[月./-]\d{1,2}日?|\d{1,2}月\d{1,2}日|\d{4}[/-]\d{1,2}[/-]\d{1,2}|\d{1,2}[/-]\d{1,2}|^\d{1,2}日$|^\d{1,2}$|^[日月火水木金土]$/.test(normalizeCell(value));
 }
 
 function isMetadataOnly(value) {
@@ -1043,14 +1043,20 @@ function buildDateTokens(date, options = {}) {
   const year = date.getFullYear();
   const month = date.getMonth() + 1;
   const day = date.getDate();
+  const paddedMonth = String(month).padStart(2, "0");
+  const paddedDay = String(day).padStart(2, "0");
   const reiwa = year - 2018;
   const tokens = [
     `${year}/${month}/${day}`,
-    `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+    `${year}-${paddedMonth}-${paddedDay}`,
+    `${year}-${month}-${day}`,
     `${month}/${day}`,
+    `${paddedMonth}/${paddedDay}`,
     `${month}月${day}日`,
     `${day}日`,
-    `R${reiwa}.${String(month).padStart(2, "0")}.${String(day).padStart(2, "0")}`,
+    `R${reiwa}.${paddedMonth}.${paddedDay}`,
+    `R${reiwa}.${month}.${day}`,
+    `令和${reiwa}年${month}月${day}日`,
   ];
   if (includeBareDay) tokens.push(`${day}`);
   return tokens;
@@ -1087,6 +1093,21 @@ function getStorageJson(key, fallback) {
 function normalizeCell(value) {
   if (value instanceof Date) return `${value.getFullYear()}/${value.getMonth() + 1}/${value.getDate()}`;
   return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function normalizeSheetCellValue(cell) {
+  if (!cell) return "";
+  if (cell.v instanceof Date) return normalizeCell(cell.v);
+  if (typeof cell.v === "number" && typeof cell.w === "string" && cell.w.trim()) return normalizeCell(cell.w);
+  return normalizeCell(cell.v ?? cell.w ?? "");
+}
+
+function normalizeDateText(value) {
+  return normalizeCell(value)
+    .replace(/[（）()\s]/g, "")
+    .replace(/[－ー―]/g, "-")
+    .replace(/令和(\d{1,2})年(\d{1,2})月(\d{1,2})日?/g, "R$1.$2.$3")
+    .replace(/R(\d{1,2})[年/-](\d{1,2})[月/-](\d{1,2})日?/gi, "R$1.$2.$3");
 }
 
 function uniqueStrings(values) {

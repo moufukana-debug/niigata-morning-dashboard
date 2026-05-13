@@ -555,18 +555,88 @@ function findGroupBlockCandidates(rows, dateCandidates) {
   const blocks = [];
   bySheet.forEach((sheetRows, sheetName) => {
     const sortedRows = sheetRows.slice().sort((a, b) => a.rowIndex - b.rowIndex);
-    const groupRows = sortedRows.filter((row) => row.cells.some((cell) => isGroupLikeCell(cell.value)));
-    groupRows.forEach((row) => {
-      const groupCell = row.cells.find((cell) => isGroupLikeCell(cell.value));
-      if (!groupCell) return;
-      const start = Math.max(sortedRows[0].rowIndex, row.rowIndex - 2);
-      const end = Math.min(sortedRows.at(-1).rowIndex, row.rowIndex + 8);
-      const blockRows = sortedRows.filter((candidate) => candidate.rowIndex >= start && candidate.rowIndex <= end);
-      const nearestDate = findNearestDateCandidate(dateCandidates, groupCell, sheetName);
-      blocks.push({ sheetName, groupCell, startRow: start, endRow: end, rows: blockRows, nearestDate });
+    sortedRows.forEach((row) => {
+      const evaluated = row.cells.map((cell) => evaluateGroupCandidate(cell, row));
+      const accepted = evaluated.filter((candidate) => candidate.accepted).sort((a, b) => b.score - a.score)[0];
+      if (!accepted) return;
+      const nearestDate = findNearestDateCandidate(dateCandidates, accepted.cell, sheetName);
+      if (dateCandidates.length && !nearestDate) return;
+      const { start, end } = getTightBlockRange(sortedRows, row.rowIndex, nearestDate);
+      const blockRows = collectRowsUntilNextDate(sortedRows, start, end, nearestDate);
+      const excludedCandidates = evaluated.filter((candidate) => !candidate.accepted).map((candidate) => `${candidate.value}: ${candidate.reason}`);
+      blocks.push({
+        sheetName,
+        groupCell: accepted.cell,
+        groupScore: accepted.score,
+        groupReason: accepted.reason,
+        excludedCandidates,
+        startRow: start,
+        endRow: blockRows.at(-1)?.rowIndex ?? end,
+        rows: blockRows,
+        nearestDate,
+      });
     });
   });
   return dedupeBlocks(blocks);
+}
+function getTightBlockRange(sortedRows, groupRowIndex, nearestDate) {
+  const firstRow = sortedRows[0]?.rowIndex ?? groupRowIndex;
+  const lastRow = sortedRows.at(-1)?.rowIndex ?? groupRowIndex;
+  const anchorRow = nearestDate ? Math.min(groupRowIndex, nearestDate.rowIndex) : groupRowIndex;
+  return {
+    start: Math.max(firstRow, anchorRow - 1),
+    end: Math.min(lastRow, groupRowIndex + 5),
+  };
+}
+
+function collectRowsUntilNextDate(sortedRows, start, end, nearestDate) {
+  const rows = [];
+  for (const row of sortedRows) {
+    if (row.rowIndex < start || row.rowIndex > end) continue;
+    const hasOtherDate = row.cells.some((cell) => isAnyDateLikeCell(cell.value)) && (!nearestDate || Math.abs(row.rowIndex - nearestDate.rowIndex) > 1);
+    if (rows.length && hasOtherDate) break;
+    rows.push(row);
+  }
+  return rows;
+}
+
+function evaluateGroupCandidate(cell, row) {
+  const value = normalizeCell(cell.value);
+  const rowText = row.cells.map((item) => item.value).join(" ");
+  const organization = getOrganizationMatch(value);
+  if (!value) return { cell, value, accepted: false, score: 0, reason: "空セル" };
+  if (isStaffContext(value, rowText)) return { cell, value, accepted: false, score: 0, reason: "職員・担当欄の値" };
+  if (isTimeLikeCell(value) || isPlaceLikeCell(value) || isActivityLikeCell(value) || isAnyDateLikeCell(value)) return { cell, value, accepted: false, score: 0, reason: "時間・場所・活動・日付セル" };
+  if (!organization && isPersonalNameLike(value)) return { cell, value, accepted: false, score: 0, reason: "個人名らしい短い文字列" };
+  if (!organization) return { cell, value, accepted: false, score: 0, reason: "団体名キーワード不足" };
+  return { cell, value, accepted: true, score: organization.score, reason: organization.reason };
+}
+
+function getOrganizationMatch(value) {
+  const text = normalizeCell(value);
+  const strongPatterns = [
+    /小学校|中学校|高等学校|高校|大学|幼稚園|保育園|こども園|少年団|スポーツ少年団|協会|連盟|クラブ|研修会|講習会|教室|利用団体|引率指導者|子ども会|こども会/,
+    /学校|学園|園|団|会|講座|チーム|センター/,
+  ];
+  if (strongPatterns[0].test(text)) return { score: 100, reason: "学校名・研修会名などの強い団体キーワード" };
+  if (strongPatterns[1].test(text) && text.length >= 4) return { score: 75, reason: "団体キーワード" };
+  return null;
+}
+
+function isStaffContext(value, rowText) {
+  const text = normalizeCell(value);
+  if (text === STAFF_NAME) return true;
+  if (/担当|指導|職員|所員|スタッフ|係/.test(text)) return true;
+  if (/担当|指導|職員|所員|スタッフ|係/.test(rowText) && isPersonalNameLike(text)) return true;
+  return false;
+}
+
+function isPersonalNameLike(value) {
+  const text = normalizeCell(value).replace(/\s+/g, "");
+  if (!text || text.length < 2 || text.length > 4) return false;
+  if (getOrganizationMatch(text)) return false;
+  if (/市|町|村|校|園|会|団|館|室|場/.test(text)) return false;
+  return /^[一-龠ぁ-んァ-ヶ]{2,4}$/.test(text);
 }
 
 function dedupeBlocks(blocks) {
@@ -587,7 +657,7 @@ function findNearestDateCandidate(dateCandidates, cell, sheetName) {
       distance: Math.abs(dateCell.rowIndex - cell.rowIndex) + Math.min(Math.abs(dateCell.columnIndex - cell.columnIndex), 8),
       rowDistance: Math.abs(dateCell.rowIndex - cell.rowIndex),
     }))
-    .filter(({ distance, rowDistance }) => distance <= 22 || rowDistance <= 14)
+    .filter(({ distance, rowDistance }) => distance <= 10 && rowDistance <= 6)
     .sort((a, b) => a.distance - b.distance)[0]?.dateCell || null;
 }
 
@@ -605,8 +675,15 @@ function blockToEvent(block) {
   const rawMatch = nearestDate?.matchLevel || "confirm";
   const event = eventFromValues(values, `${block.sheetName} ${block.startRow + 1}-${block.endRow + 1}行目`, rawMatch, dateEvidence);
   event.group = block.groupCell.value || event.group;
-  event.staff = findFirstByPredicate(rowValues, isStaffLikeText) || UNKNOWN;
+  event.staff = findStaffFromBlock(rowValues) || UNKNOWN;
   event.note = buildBlockNote(event.note, rowValues);
+  event.debug = {
+    sheetName: block.sheetName,
+    rowRange: `${block.startRow + 1}-${block.endRow + 1}行目`,
+    groupCandidate: block.groupCell.value,
+    excludedCandidates: block.excludedCandidates || [],
+    reason: block.groupReason || "団体候補として採用",
+  };
   const requiredMissing = [event.group, event.time, event.activity, event.place].includes(UNKNOWN);
   if (!nearestDate) event.matchLevel = "confirm";
   else if (nearestDate.matchLevel === "exact" && !requiredMissing) event.matchLevel = "exact";
@@ -745,9 +822,21 @@ function renderEvents() {
         <span><strong>備考</strong>：${escapeHtml(event.note)}</span>
         <span><strong>根拠</strong>：${escapeHtml(event.evidence || UNKNOWN)}</span>
         <span><strong>抽出元</strong>：${escapeHtml(event.source)}</span>
+        ${renderEventDebug(event)}
       </div>
     </article>
   `).join("");
+}
+
+function renderEventDebug(event) {
+  if (!event.debug) return "";
+  const excluded = event.debug.excludedCandidates?.length ? event.debug.excludedCandidates.join(" / ") : "なし";
+  return `
+    <span><strong>デバッグ</strong>：${escapeHtml(event.debug.sheetName)} ${escapeHtml(event.debug.rowRange)}</span>
+    <span><strong>団体名候補</strong>：${escapeHtml(event.debug.groupCandidate || UNKNOWN)}</span>
+    <span><strong>除外候補</strong>：${escapeHtml(excluded)}</span>
+    <span><strong>採用理由</strong>：${escapeHtml(event.debug.reason || UNKNOWN)}</span>
+  `;
 }
 
 function renderExcelLog() {
@@ -893,11 +982,20 @@ function isStaffLikeText(value) {
   return /担当|職員|係|指導|所員|スタッフ/.test(text) && text.length <= 40;
 }
 
+function findStaffFromBlock(rowValues) {
+  const staffLine = rowValues.map((value) => normalizeCell(value)).find((value) => /担当|職員|係|指導|所員|スタッフ/.test(value));
+  if (!staffLine) return "";
+  return staffLine;
+}
+
 function isGroupLikeCell(value) {
   const text = normalizeCell(value);
-  if (!text || text.length < 2 || text.length > 40) return false;
-  if (isTimeLikeCell(text) || isPlaceLikeCell(text) || isAnyDateLikeCell(text) || /備考|注意|担当|場所|活動|時間|予定|プログラム|午前|午後/.test(text)) return false;
-  return /学校|小|中|高|大学|園|団|会|クラブ|協会|連盟|市|町|村|利用|研修|子ども|こども|少年|自然|センター|教室|講座|チーム|会議|保育|幼稚/.test(text) || /[一-龠ぁ-んァ-ヶ]{3,}/.test(text);
+  if (!text || text.length < 3 || text.length > 45) return false;
+  if (isStaffContext(text, text)) return false;
+  if (isTimeLikeCell(text) || isPlaceLikeCell(text) || isActivityLikeCell(text) || isAnyDateLikeCell(text)) return false;
+  if (/備考|注意|担当|場所|活動|時間|予定|プログラム|午前|午後|職員|所員|スタッフ|係/.test(text)) return false;
+  if (isPersonalNameLike(text)) return false;
+  return Boolean(getOrganizationMatch(text));
 }
 
 function isExcelDateCell(value, date) {

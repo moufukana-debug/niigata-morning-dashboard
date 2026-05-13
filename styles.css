@@ -111,7 +111,9 @@ p { color: var(--muted); line-height: 1.65; }
 .step-badge.warn { color: #fffaf3; background: var(--warn); }
 
 .file-grid { display: grid; gap: 12px; }
-.file-picker, .date-control {
+.file-picker,
+.date-control,
+.text-program-input {
   display: grid;
   gap: 8px;
   padding: 14px;
@@ -121,7 +123,9 @@ p { color: var(--muted); line-height: 1.65; }
   font-weight: 800;
 }
 
-input[type="file"], input[type="date"], textarea {
+input[type="file"],
+input[type="date"],
+textarea {
   width: 100%;
   border: 1px solid rgba(109, 79, 63, 0.18);
   border-radius: 16px;
@@ -133,6 +137,44 @@ input[type="file"] { padding: 10px; font-size: 0.9rem; }
 input[type="date"] { padding: 12px; }
 small { color: var(--muted); font-weight: 700; }
 .date-control { margin-top: 12px; }
+
+.text-program-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.text-program-input textarea {
+  min-height: 150px;
+}
+
+.text-program-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+button {
+  border: 0;
+  border-radius: 999px;
+  padding: 11px 16px;
+  color: #fffaf3;
+  background: var(--brown);
+  font: inherit;
+  font-weight: 900;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(102, 76, 58, 0.16);
+}
+
+button.secondary {
+  color: var(--brown-deep);
+  background: #efe0cf;
+}
+
+button:focus-visible {
+  outline: 3px solid rgba(177, 138, 112, 0.36);
+  outline-offset: 2px;
+}
 
 .summary-box {
   display: grid;

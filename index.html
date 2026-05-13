@@ -62,7 +62,7 @@
       </section>
 
       <section class="version-banner card" aria-label="公開バージョン">
-        <strong>Version: debug-2026-05-12-1</strong>
+        <strong>Version: debug-2026-05-13-text-1</strong>
         <span>Branch: work</span>
       </section>
 
@@ -80,7 +80,7 @@
           <span class="step-badge">準備</span>
           <div>
             <h2 id="setup-title">資料を読み込む</h2>
-            <p>勤務予定表PDFと調整プログラムExcelを選ぶと、今日の情報だけ表示します。</p>
+            <p>勤務予定表PDFと調整プログラムExcel、または調整プログラムのテキスト貼り付けから、今日の情報だけ表示します。</p>
           </div>
         </div>
         <div class="file-grid">
@@ -94,6 +94,17 @@
             <input id="excel-input" type="file" accept=".xlsx,.xls,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/vnd.ms-excel.sheet.macroEnabled.12" />
             <small id="excel-status">未読み込み</small>
           </label>
+        </div>
+        <div class="text-program-panel">
+          <label class="text-program-input">
+            <span>調整プログラム（テキスト貼り付け）</span>
+            <textarea id="program-text" rows="7" placeholder="Excelから範囲をコピーして貼り付け、または日付・団体名・時間・活動・場所が分かるテキストを貼り付けます。"></textarea>
+          </label>
+          <div class="text-program-actions">
+            <button id="program-text-apply" type="button">テキストを反映</button>
+            <button id="program-text-clear" type="button" class="secondary">クリア</button>
+          </div>
+          <small id="program-text-status">Excelファイルがない場合は、ここに調整プログラムを貼り付けて反映できます。</small>
         </div>
         <label class="date-control">
           <span>確認する日付</span>
@@ -135,7 +146,7 @@
             <span class="step-badge">団体</span>
             <h2 id="events-title">今日の団体・行事</h2>
           </div>
-          <div id="events-list" class="events-list empty-state">Excelを読み込むと、今日の団体・活動を表示します。</div>
+          <div id="events-list" class="events-list empty-state">Excelまたはテキスト入力を読み込むと、今日の団体・活動を表示します。</div>
           <div id="excel-log" class="analysis-log" aria-live="polite">解析ログ：Excel未読み込み</div>
           <div id="excel-debug" class="analysis-log excel-debug" aria-live="polite">読込デバッグ：Excel未読み込み</div>
         </section>

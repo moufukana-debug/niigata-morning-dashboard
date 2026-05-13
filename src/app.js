@@ -26,6 +26,10 @@ const elements = {
   dateInput: document.querySelector("#date-input"),
   pdfInput: document.querySelector("#pdf-input"),
   excelInput: document.querySelector("#excel-input"),
+  programText: document.querySelector("#program-text"),
+  programTextApply: document.querySelector("#program-text-apply"),
+  programTextClear: document.querySelector("#program-text-clear"),
+  programTextStatus: document.querySelector("#program-text-status"),
   pdfStatus: document.querySelector("#pdf-status"),
   excelStatus: document.querySelector("#excel-status"),
   workSummary: document.querySelector("#work-summary"),
@@ -55,12 +59,15 @@ try {
 }
 
 function init() {
-  requireElements(["todayLabel", "dateInput", "pdfInput", "excelInput", "pdfStatus", "excelStatus", "workSummary", "attentionList", "confirmationList", "taskList", "eventsList", "excelLog", "excelDebug", "basicInfo", "memo", "memoStatus"]);
+  requireElements(["todayLabel", "dateInput", "pdfInput", "excelInput", "programText", "programTextApply", "programTextClear", "programTextStatus", "pdfStatus", "excelStatus", "workSummary", "attentionList", "confirmationList", "taskList", "eventsList", "excelLog", "excelDebug", "basicInfo", "memo", "memoStatus"]);
   elements.dateInput.value = toInputDate(state.selectedDate);
   elements.memo.value = getStorageItem(MEMO_KEY) || "";
   elements.dateInput.addEventListener("change", onDateChange);
   elements.pdfInput.addEventListener("change", onPdfSelected);
   elements.excelInput.addEventListener("change", onExcelSelected);
+  elements.programText.addEventListener("input", onProgramTextChanged);
+  elements.programTextApply.addEventListener("click", onProgramTextApply);
+  elements.programTextClear.addEventListener("click", onProgramTextClear);
   elements.memo.addEventListener("input", saveMemo);
   render();
   window.NIIGATA_APP_READY = true;
@@ -117,6 +124,7 @@ async function onExcelSelected(event) {
     state.workbookRows = await extractWorkbookRows(file, updateExcelDebugStage);
     state.excelDebug = state.workbookRows.debug ? { ...state.excelDebug, ...state.workbookRows.debug, stageLog: state.excelDebug.stageLog } : state.excelDebug;
     elements.excelStatus.textContent = `✅ ${file.name}（${fileKind.label} / ${state.workbookRows.length}行）`;
+    elements.programTextStatus.textContent = "Excelファイルの内容を使用中です。テキスト入力を使う場合は貼り付けて「テキストを反映」を押してください。";
     refreshDerivedData();
     updateExcelDebugStage(state.events.length ? `解析結果${state.events.length}件` : "解析結果0件", {
       analysisStatus: state.events.length ? `団体抽出成功（${state.events.length}件）` : `団体抽出失敗（${UNKNOWN}）`,
@@ -129,6 +137,42 @@ async function onExcelSelected(event) {
     state.excelDebug.error = error instanceof Error ? error.message : String(error);
     updateExcelDebugStage(`失敗: ${state.excelDebug.error}`, { analysisStatus: `停止段階: ${state.excelDebug.stageLog?.at(-1) || "不明"}` });
     elements.excelStatus.textContent = formatExcelReadError(error);
+    refreshDerivedData();
+  }
+}
+
+function onProgramTextChanged() {
+  const hasText = Boolean(elements.programText.value.trim());
+  elements.programTextStatus.textContent = hasText
+    ? "貼り付けた内容を使うには「テキストを反映」を押してください。"
+    : "Excelファイルがない場合は、ここに調整プログラムを貼り付けて反映できます。";
+}
+
+function onProgramTextApply() {
+  const text = elements.programText.value;
+  if (!text.trim()) {
+    elements.programTextStatus.textContent = `テキストが空です（${UNKNOWN}）`;
+    return;
+  }
+
+  const rows = extractProgramTextRows(text);
+  state.workbookRows = rows;
+  state.excelDebug = rows.debug || createTextInputDebug(text, rows.sheets?.[0]);
+  elements.excelStatus.textContent = `✅ テキスト入力（${rows.length}行）`;
+  elements.programTextStatus.textContent = rows.length
+    ? `テキスト入力を反映しました（${rows.length}行）。Excelファイルよりこちらの内容を使用中です。`
+    : `読み取れる行がありませんでした（${UNKNOWN}）`;
+  refreshDerivedData();
+}
+
+function onProgramTextClear() {
+  elements.programText.value = "";
+  elements.programTextStatus.textContent = "テキスト入力をクリアしました。Excelまたはテキストを読み込んでください。";
+  if (state.workbookRows.sourceType === "text") {
+    state.workbookRows = [];
+    state.excelLog = createEmptyExcelLog();
+    state.excelDebug = createEmptyExcelDebug();
+    elements.excelStatus.textContent = "未読み込み";
     refreshDerivedData();
   }
 }
@@ -270,6 +314,69 @@ function sheetToFilledSheet(sheetName, sheet) {
   };
 }
 
+function extractProgramTextRows(text) {
+  const lines = text.replace(/\r\n?/g, "\n").split("\n");
+  const rows = [];
+  const grid = [];
+
+  lines.forEach((line, lineIndex) => {
+    const cells = splitProgramTextLine(line);
+    grid[lineIndex] = cells;
+    if (!cells.length) return;
+    rows.push({
+      sheetName: "テキスト入力",
+      rowIndex: lineIndex,
+      cells: cells.map((value, columnIndex) => ({ value, columnIndex, rowIndex: lineIndex, fromMerge: false })),
+    });
+  });
+
+  const sheet = {
+    sheetName: "テキスト入力",
+    rows,
+    grid,
+    usedMerges: false,
+    mergeCount: 0,
+    rowCount: lines.length,
+    columnCount: grid.reduce((max, row) => Math.max(max, row.length), 0),
+  };
+  rows.sheets = [sheet];
+  rows.usedMerges = false;
+  rows.sourceType = "text";
+  rows.debug = createTextInputDebug(text, sheet);
+  return rows;
+}
+
+function splitProgramTextLine(line) {
+  const normalized = normalizeCell(line);
+  if (!normalized) return [];
+  const tabSeparated = line.split("\t").map(normalizeCell).filter(Boolean);
+  if (tabSeparated.length > 1) return tabSeparated;
+
+  const columnSeparated = normalized.split(/\s{2,}|　+|[|,，]/).map(normalizeCell).filter(Boolean);
+  if (columnSeparated.length > 1) return columnSeparated;
+
+  return normalized.split(/\s+/).map(normalizeCell).filter(Boolean);
+}
+
+function createTextInputDebug(text, sheet) {
+  return {
+    ...createEmptyExcelDebug(),
+    fileName: "テキスト入力",
+    extension: "text",
+    sizeLabel: formatTextLength(text),
+    fileReadStatus: "成功",
+    workbookStatus: "テキストから生成",
+    sheetStatus: sheet?.rows.length ? "成功" : "読み取れる行なし",
+    sheetNames: ["テキスト入力"],
+    usedMerges: false,
+    sheetSummaries: sheet ? [{ name: sheet.sheetName, rowCount: sheet.rowCount, columnCount: sheet.columnCount, nonEmptyRows: sheet.rows.length, mergeCount: 0 }] : [],
+    preview: sheet ? buildExcelPreview(sheet) : null,
+    analysisStatus: "解析開始",
+    selectionStatus: "テキスト入力を反映しました",
+    stageLog: ["テキスト入力を解析しました"],
+  };
+}
+
 function createEmptyExcelDebug() {
   return {
     fileName: "未選択",
@@ -313,6 +420,10 @@ function buildExcelPreview(sheet) {
     previewRows.push({ rowNumber: rowIndex + 1, nonEmptyCount: nonEmptyValues.length, values: nonEmptyValues.slice(0, 12) });
   }
   return { sheetName: sheet.sheetName, mergeCount: sheet.mergeCount, rows: previewRows };
+}
+
+function formatTextLength(text) {
+  return `${String(text || "").length}文字`;
 }
 
 function formatFileSize(size) {
@@ -734,7 +845,7 @@ function eventRank(event) {
 function buildConfirmations() {
   const confirmations = [];
   if (!state.pdfData) confirmations.push("勤務予定表PDFが未読み込みです");
-  if (!state.workbookRows.length) confirmations.push("調整プログラムExcelが未読み込みです");
+  if (!state.workbookRows.length) confirmations.push("調整プログラムExcelまたはテキスト入力が未読み込みです");
   if (!state.work || state.work.status === UNKNOWN || state.work.confidence === "low") confirmations.push("西村さんの勤務は原本で要確認");
   if (state.pdfData && !state.attention.length) confirmations.push("今日の特記事項を自動検出できませんでした");
   if (state.events.some((event) => [event.group, event.time, event.activity, event.place, event.note].includes(UNKNOWN))) confirmations.push("団体・行事に不足項目があります");
@@ -799,7 +910,7 @@ function renderTasks() {
 function renderEvents() {
   if (!state.workbookRows.length) {
     elements.eventsList.className = "events-list empty-state";
-    elements.eventsList.textContent = "Excelを読み込むと、今日の団体・活動を表示します。";
+    elements.eventsList.textContent = "Excelまたはテキスト入力を読み込むと、今日の団体・活動を表示します。";
     return;
   }
   if (!state.events.length) {
@@ -1003,7 +1114,9 @@ function isExcelDateCell(value, date) {
 }
 
 function isAnyDateLikeCell(value) {
-  return /(?:R|令和)\d{1,2}[年./-]\d{1,2}[月./-]\d{1,2}日?|\d{1,2}月\d{1,2}日|\d{4}[/-]\d{1,2}[/-]\d{1,2}|\d{1,2}[/-]\d{1,2}|^\d{1,2}日$|^\d{1,2}$|^[日月火水木金土]$/.test(normalizeCell(value));
+  const text = normalizeCell(value);
+  if (isTimeLikeCell(text)) return false;
+  return /(?:R|令和)\d{1,2}[年./-]\d{1,2}[月./-]\d{1,2}日?|\d{1,2}月\d{1,2}日|\d{4}[/-]\d{1,2}[/-]\d{1,2}|\d{1,2}[/-]\d{1,2}|^\d{1,2}日$|^\d{1,2}$|^[日月火水木金土]$/.test(text);
 }
 
 function isMetadataOnly(value) {
